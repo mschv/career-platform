@@ -17,6 +17,7 @@ import {
   Button,
   Alert,
   CircularProgress,
+  TextField,
 } from '@mui/material';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import ChatBubbleRoundedIcon from '@mui/icons-material/ChatBubbleRounded';
@@ -47,7 +48,40 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [pendingSaveError, setPendingSaveError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [editInput, setEditInput] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const pendingSaveStarted = useRef(false);
+
+  async function handleEditProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editInput.trim() || editLoading) return;
+
+    setEditLoading(true);
+    setEditError(null);
+
+    try {
+      const res = await fetch('/api/profile/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction: editInput }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setEditError(data.error ?? 'No pudimos actualizar tu perfil.');
+        return;
+      }
+
+      setProfile(data.profile);
+      setEditInput('');
+      setChatOpen(false);
+    } catch {
+      setEditError('Tuvimos un problema de conexión. Intenta de nuevo.');
+    } finally {
+      setEditLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -263,6 +297,8 @@ export default function ProfilePage() {
 
       {chatOpen && (
         <Paper
+          component="form"
+          onSubmit={handleEditProfile}
           variant="outlined"
           sx={{
             position: 'fixed',
@@ -278,12 +314,44 @@ export default function ProfilePage() {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Dime qué quieres cambiar de tu perfil y lo actualizo por ti.
-            {/* MVP note: reuse the /api/chat route + extractProfileFromText
-                from lib/ai/groq.ts to parse the reply into profile fields. */}
           </Typography>
-          <Button fullWidth variant="contained" size="small" onClick={() => setChatOpen(false)}>
-            Entendido
-          </Button>
+          {editError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {editError}
+            </Alert>
+          )}
+          <TextField
+            fullWidth
+            multiline
+            maxRows={4}
+            size="small"
+            placeholder="Ej: agrega Python a mis habilidades"
+            value={editInput}
+            onChange={(e) => setEditInput(e.target.value)}
+            disabled={editLoading}
+            sx={{ mb: 1.5 }}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button
+              fullWidth
+              variant="outlined"
+              size="small"
+              onClick={() => setChatOpen(false)}
+              disabled={editLoading}
+            >
+              Cerrar
+            </Button>
+            <Button
+              fullWidth
+              type="submit"
+              variant="contained"
+              size="small"
+              disabled={editLoading || !editInput.trim()}
+              startIcon={editLoading ? <CircularProgress size={14} color="inherit" /> : undefined}
+            >
+              {editLoading ? 'Enviando…' : 'Enviar'}
+            </Button>
+          </Stack>
         </Paper>
       )}
     </Box>
