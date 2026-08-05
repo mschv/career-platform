@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 
 // Needs the Node.js runtime (not edge) — pdf-parse and mammoth both
@@ -24,8 +24,16 @@ export async function POST(req: NextRequest) {
     let text = '';
 
     if (name.endsWith('.pdf')) {
-      const data = await pdfParse(buffer);
-      text = data.text;
+      const parser = new PDFParse({ data: buffer });
+      try {
+        // Default pageJoiner ('-- page_number of total_number --') would
+        // otherwise leak fake-looking metadata lines into the extracted
+        // text for multi-page CVs.
+        const result = await parser.getText({ pageJoiner: '\n\n' });
+        text = result.text;
+      } finally {
+        await parser.destroy();
+      }
     } else if (name.endsWith('.docx')) {
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
