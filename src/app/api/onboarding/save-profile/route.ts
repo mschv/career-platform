@@ -32,6 +32,10 @@ export async function POST(req: NextRequest) {
       educacion: Array.isArray(extracted.educacion) ? extracted.educacion : [],
       habilidades: Array.isArray(extracted.habilidades) ? extracted.habilidades : [],
       intereses: Array.isArray(extracted.intereses) ? extracted.intereses : [],
+      suggested_roles: Array.isArray(extracted.suggested_roles) ? extracted.suggested_roles : [],
+      upskilling_suggestions: Array.isArray(extracted.upskilling_suggestions)
+        ? extracted.upskilling_suggestions
+        : [],
     };
 
     const { data, error } = await supabase

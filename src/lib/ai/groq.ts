@@ -46,8 +46,17 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional, con esta forma:
   "experiencia": [{ "puesto": "", "empresa": "", "descripcion": "" }],
   "educacion": [{ "titulo": "", "institucion": "" }],
   "habilidades": ["..."],
-  "intereses": ["..."]
-}`;
+  "intereses": ["..."],
+  "suggested_roles": [{ "role": "", "why": "" }],
+  "upskilling_suggestions": ["..."]
+}
+
+Para suggested_roles, sugiere 2-4 roles laborales que le podrían quedar bien
+dada su experiencia, habilidades e intereses, cada uno con una razón breve
+("why") en español. Para upskilling_suggestions, sugiere 2-4 habilidades o
+áreas concretas que le convendría desarrollar para avanzar en esos roles. Si
+la información es insuficiente para sugerir algo con confianza, devuelve un
+array vacío en ese campo en vez de inventar contenido genérico.`;
 
   const raw = await generateText({ system, prompt: rawText, temperature: 0.2 });
 
