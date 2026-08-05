@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Box,
   Container,
@@ -13,6 +15,8 @@ import {
   IconButton,
   Divider,
   Button,
+  Alert,
+  CircularProgress,
 } from '@mui/material';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import ChatBubbleRoundedIcon from '@mui/icons-material/ChatBubbleRounded';
@@ -20,34 +24,143 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import AppNav from '@/components/AppNav';
 import GrowthRing from '@/components/GrowthRing';
 import { tokens } from '@/lib/theme';
+import { createClient } from '@/lib/supabase/client';
+import { computeCompleteness } from '@/lib/profile';
 
-// MVP: mock data shown so the UI is demoable without a configured backend.
-// Replace with a Supabase fetch of the `profiles` row for the signed-in
-// user (see supabase/schema.sql) once auth is wired end-to-end.
-const mockProfile = {
-  completeness: 72,
-  experiencia: [
-    { puesto: 'Practicante de UX', empresa: 'Estudio Coral', descripcion: 'Investigación de usuarios y prototipos para app móvil.' },
-    { puesto: 'Proyecto de tesis', empresa: 'Universidad', descripcion: 'Diseño e implementación de plataforma web con IA.' },
-  ],
-  habilidades: ['Figma', 'Investigación de usuarios', 'React', 'Next.js', 'Comunicación'],
-  suggestedRoles: [
-    { role: 'UX Researcher Jr.', why: 'Tu práctica en Estudio Coral y tu tesis muestran experiencia directa investigando usuarios.' },
-    { role: 'Product Designer Jr.', why: 'Combinas diseño (Figma) con código (React) — perfil poco común y valorado en equipos pequeños.' },
-    { role: 'Analista de producto', why: 'Un camino que quizá no has considerado: tu trabajo de tesis analiza comportamiento de usuarios, base sólida para esta ruta.' },
-  ],
-  upskilling: ['Investigación cuantitativa (encuestas, analítica)', 'Fundamentos de accesibilidad web (WCAG)'],
+const PENDING_PROFILE_KEY = 'pending_profile';
+
+type ProfileRow = {
+  experiencia: { puesto?: string; empresa?: string; descripcion?: string }[];
+  educacion: { titulo?: string; institucion?: string }[];
+  habilidades: string[];
+  intereses: string[];
+  suggested_roles: { role: string; why: string }[];
+  upskilling_suggestions: string[];
+  completeness: number;
 };
 
+type Status = 'loading' | 'redirecting' | 'ready';
+
 export default function ProfilePage() {
+  const router = useRouter();
+  const [status, setStatus] = useState<Status>('loading');
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [pendingSaveError, setPendingSaveError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const pendingSaveStarted = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (!cancelled) setStatus('redirecting');
+        router.replace('/login');
+        return;
+      }
+
+      const pendingRaw = window.localStorage.getItem(PENDING_PROFILE_KEY);
+      let resolvedProfile: ProfileRow | null = null;
+
+      // Guard against React Strict Mode's dev-only double effect invocation
+      // firing this twice — the extraction is non-deterministic, so two
+      // concurrent calls could upsert two different results.
+      if (pendingRaw && !pendingSaveStarted.current) {
+        pendingSaveStarted.current = true;
+        try {
+          const pending = JSON.parse(pendingRaw);
+          const res = await fetch('/api/onboarding/save-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: pending.transcript }),
+          });
+          const data = await res.json();
+
+          if (!res.ok) {
+            // Keep the pending data in storage so the user doesn't lose
+            // their onboarding conversation — they can retry by reloading.
+            if (!cancelled) {
+              setPendingSaveError(data.error ?? 'No pudimos guardar tu perfil recién creado.');
+            }
+          } else {
+            window.localStorage.removeItem(PENDING_PROFILE_KEY);
+            resolvedProfile = data.profile;
+            if (!cancelled) setProfile(resolvedProfile);
+          }
+        } catch {
+          if (!cancelled) setPendingSaveError('No pudimos guardar tu perfil recién creado. Intenta de nuevo.');
+        }
+      }
+
+      if (!cancelled && !resolvedProfile) {
+        const { data } = await supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+        if (!cancelled) setProfile(data);
+      }
+
+      if (!cancelled) setStatus('ready');
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (status !== 'ready') {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress size={28} />
+      </Box>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <Box sx={{ minHeight: '100vh' }}>
+        <AppNav />
+        <Container maxWidth="sm" sx={{ py: 10, textAlign: 'center' }}>
+          {pendingSaveError && (
+            <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
+              {pendingSaveError}
+            </Alert>
+          )}
+          <Typography variant="h5" sx={{ mb: 1.5 }}>
+            Aún no tienes un perfil guardado
+          </Typography>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Cuéntanos tu experiencia en una conversación de unos minutos y armamos tu perfil por ti.
+          </Typography>
+          <Button component={Link} href="/onboarding" variant="contained" size="large">
+            Crear mi perfil
+          </Button>
+        </Container>
+      </Box>
+    );
+  }
+
+  const completeness = computeCompleteness(profile);
+  const experiencia = profile.experiencia ?? [];
+  const habilidades = profile.habilidades ?? [];
+  const suggestedRoles = profile.suggested_roles ?? [];
+  const upskilling = profile.upskilling_suggestions ?? [];
 
   return (
     <Box sx={{ minHeight: '100vh' }}>
       <AppNav />
       <Container maxWidth="md" sx={{ py: 5 }}>
+        {pendingSaveError && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {pendingSaveError}
+          </Alert>
+        )}
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={4} alignItems={{ sm: 'center' }} sx={{ mb: 5 }}>
-          <GrowthRing value={mockProfile.completeness} size={110} label="perfil" sublabel="completo" />
+          <GrowthRing value={completeness} size={110} label="perfil" sublabel="completo" />
           <Box>
             <Typography variant="h3" sx={{ fontSize: 30, mb: 0.5 }}>
               Tu perfil
@@ -61,24 +174,30 @@ export default function ProfilePage() {
         <Grid container spacing={3}>
           <Grid item xs={12} md={7}>
             <SectionCard title="Experiencia">
-              <Stack spacing={2}>
-                {mockProfile.experiencia.map((e, i) => (
-                  <Box key={i}>
-                    <Typography fontWeight={600}>{e.puesto}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {e.empresa}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>
-                      {e.descripcion}
-                    </Typography>
-                  </Box>
-                ))}
-              </Stack>
+              {experiencia.length > 0 ? (
+                <Stack spacing={2}>
+                  {experiencia.map((e, i) => (
+                    <Box key={i}>
+                      <Typography fontWeight={600}>{e.puesto}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {e.empresa}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        {e.descripcion}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  Aún no hay experiencia registrada.
+                </Typography>
+              )}
             </SectionCard>
 
             <SectionCard title="Habilidades">
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                {mockProfile.habilidades.map((h) => (
+                {habilidades.map((h) => (
                   <Chip key={h} label={h} sx={{ bgcolor: tokens.color.surfaceMuted }} />
                 ))}
                 <Chip icon={<AddRoundedIcon />} label="Agregar" variant="outlined" />
@@ -86,13 +205,19 @@ export default function ProfilePage() {
             </SectionCard>
 
             <SectionCard title="Ideas para seguir creciendo">
-              <Stack spacing={1}>
-                {mockProfile.upskilling.map((u) => (
-                  <Typography key={u} variant="body2">
-                    • {u}
-                  </Typography>
-                ))}
-              </Stack>
+              {upskilling.length > 0 ? (
+                <Stack spacing={1}>
+                  {upskilling.map((u) => (
+                    <Typography key={u} variant="body2">
+                      • {u}
+                    </Typography>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  Aún no generado.
+                </Typography>
+              )}
             </SectionCard>
           </Grid>
 
@@ -101,18 +226,24 @@ export default function ProfilePage() {
               <Typography variant="h6" sx={{ mb: 2 }}>
                 Roles que podrían quedarte bien
               </Typography>
-              <Stack spacing={2.5} divider={<Divider />}>
-                {mockProfile.suggestedRoles.map((r) => (
-                  <Box key={r.role}>
-                    <Typography fontWeight={600} sx={{ mb: 0.5 }}>
-                      {r.role}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {r.why}
-                    </Typography>
-                  </Box>
-                ))}
-              </Stack>
+              {suggestedRoles.length > 0 ? (
+                <Stack spacing={2.5} divider={<Divider />}>
+                  {suggestedRoles.map((r) => (
+                    <Box key={r.role}>
+                      <Typography fontWeight={600} sx={{ mb: 0.5 }}>
+                        {r.role}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {r.why}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  Aún no generado.
+                </Typography>
+              )}
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
                 Son sugerencias, no destinos — tú decides qué camino explorar.
               </Typography>

@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { AppBar, Toolbar, Box, Typography, Button, Stack } from '@mui/material';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { tokens } from '@/lib/theme';
+import { createClient } from '@/lib/supabase/client';
 
 const links = [
   { href: '/profile', label: 'Mi perfil' },
@@ -12,6 +13,13 @@ const links = [
 
 export default function AppNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace('/login');
+  }
 
   return (
     <AppBar
@@ -48,7 +56,7 @@ export default function AppNav() {
             </Button>
           ))}
           <Box sx={{ width: 12 }} />
-          <Button variant="outlined" size="small" component={Link} href="/login">
+          <Button variant="outlined" size="small" onClick={handleLogout}>
             Salir
           </Button>
         </Stack>

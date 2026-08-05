@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import { Box, Button, Container, Stack, Typography, Chip, Grid } from '@mui/material';
 import GrowthRing from '@/components/GrowthRing';

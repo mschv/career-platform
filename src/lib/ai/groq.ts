@@ -54,6 +54,18 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional, con esta forma:
   try {
     return JSON.parse(raw);
   } catch {
+    // Despite instructions, the model sometimes wraps the JSON in a
+    // markdown code fence or adds a leading/trailing sentence. Try
+    // pulling out the first balanced-looking {...} block before giving up.
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        // fall through to the logged failure below
+      }
+    }
+    console.error('extractProfileFromText: failed to parse model output as JSON', raw);
     // MVP fallback: surface the raw text so the UI can still show something
     // and the user can correct it manually, instead of a hard failure.
     return { experiencia: [], educacion: [], habilidades: [], intereses: [], _raw: raw };

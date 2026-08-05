@@ -60,3 +60,13 @@ create policy "application_documents_owner" on application_documents
       and a.user_id = auth.uid()
     )
   );
+
+-- Table-level grants — RLS above decides *which rows*, but Postgres still
+-- checks table-level privileges first. Tables created via the SQL editor
+-- don't automatically get the grants the Supabase dashboard's table editor
+-- would apply, so without this every query 403s with "permission denied
+-- for table X" regardless of the RLS policies being correct.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated, service_role;

@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(git ls-remote *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh auth *)",
+      "Read(//Users/marisuchang/.ssh/**)",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com)",
+      "Bash(git remote *)",
+      "Bash(git push *)"
     ]
   }
 }

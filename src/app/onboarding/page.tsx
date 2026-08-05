@@ -19,6 +19,11 @@ import SendRoundedIcon from '@mui/icons-material/SendRounded';
 import AttachFileRoundedIcon from '@mui/icons-material/AttachFileRounded';
 import MicRoundedIcon from '@mui/icons-material/MicRounded';
 import { tokens } from '@/lib/theme';
+import { createClient } from '@/lib/supabase/client';
+
+// Key the pending conversation is stashed under before the magic-link
+// round trip. Read back on /profile once the user is authenticated.
+const PENDING_PROFILE_KEY = 'pending_profile';
 
 // display: what renders in the bubble. content: what actually gets sent to
 // the model. They differ for file uploads — nobody wants to read 6000
@@ -36,6 +41,11 @@ export default function OnboardingPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
+  const [email, setEmail] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Voice dictation (Web Speech API — client-side, no backend needed) ---
@@ -103,7 +113,12 @@ export default function OnboardingPage() {
         body: JSON.stringify({ messages: next.map(({ role, content }) => ({ role, content })) }),
       });
       const data = await res.json();
-      setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? data.error }]);
+      let reply: string = data.reply ?? data.error;
+      const ready = typeof reply === 'string' && reply.includes('[PERFIL_LISTO]');
+      if (ready) reply = reply.replace('[PERFIL_LISTO]', '').trim();
+
+      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+      if (ready) setProfileReady(true);
     } catch {
       setMessages((m) => [
         ...m,
@@ -147,11 +162,50 @@ export default function OnboardingPage() {
     }
   }
 
+  // --- Save & sign up (magic link) ---
+  async function handleSaveEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+
+    setSavingEmail(true);
+    setEmailError(null);
+
+    try {
+      // Stash the conversation before sending the magic link — the OTP
+      // round trip reloads the app on /profile, so anything in component
+      // state would otherwise be lost.
+      const transcript = messages
+        .map((m) => `${m.role === 'user' ? 'Usuario' : 'Asistente'}: ${m.content}`)
+        .join('\n');
+      window.localStorage.setItem(
+        PENDING_PROFILE_KEY,
+        JSON.stringify({ transcript, savedAt: new Date().toISOString() })
+      );
+
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/profile` },
+      });
+
+      if (error) {
+        setEmailError('No pudimos enviar el enlace. Revisa el correo e intenta de nuevo.');
+        return;
+      }
+      setEmailSent(true);
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
   const completeness = Math.min(90, messages.filter((m) => m.role === 'user').length * 18);
 
   return (
-    <Box sx={{ bgcolor: tokens.color.bg, minHeight: '100vh' }}>
-      <Container maxWidth="sm" sx={{ pt: 4, pb: 4 }}>
+    <Box sx={{ bgcolor: tokens.color.bg, height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Container
+        maxWidth="sm"
+        sx={{ pt: 4, pb: 4, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      >
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
           <Typography
             component={Link}
@@ -188,7 +242,7 @@ export default function OnboardingPage() {
 
         <Paper
           variant="outlined"
-          sx={{ p: 2, height: 440, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}
+          sx={{ p: 2, flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}
         >
           {messages.map((m, i) => (
             <Stack
@@ -215,6 +269,62 @@ export default function OnboardingPage() {
               </Box>
             </Stack>
           ))}
+          {profileReady && !emailSent && (
+            <Box
+              component="form"
+              onSubmit={handleSaveEmail}
+              sx={{
+                alignSelf: 'center',
+                textAlign: 'center',
+                bgcolor: tokens.color.surfaceMuted,
+                borderRadius: `${tokens.radius.md}px`,
+                p: 2.5,
+                mt: 1,
+                width: '100%',
+                maxWidth: 380,
+              }}
+            >
+              <Typography variant="body2" sx={{ mb: 1.5, fontWeight: 600 }}>
+                ¡Tu perfil está listo! Guarda tu perfil con tu correo para verlo cuando quieras.
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <TextField
+                  size="small"
+                  type="email"
+                  required
+                  fullWidth
+                  placeholder="tu@correo.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  sx={{ bgcolor: 'background.paper' }}
+                />
+                <Button type="submit" variant="contained" size="small" disabled={savingEmail}>
+                  {savingEmail ? 'Enviando…' : 'Guardar'}
+                </Button>
+              </Stack>
+              {emailError && (
+                <Typography variant="caption" sx={{ color: tokens.color.danger, mt: 1, display: 'block' }}>
+                  {emailError}
+                </Typography>
+              )}
+            </Box>
+          )}
+          {profileReady && emailSent && (
+            <Box
+              sx={{
+                alignSelf: 'center',
+                textAlign: 'center',
+                bgcolor: tokens.color.surfaceMuted,
+                borderRadius: `${tokens.radius.md}px`,
+                p: 2.5,
+                mt: 1,
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                Revisa tu correo — te enviamos un enlace para ver tu perfil.
+              </Typography>
+            </Box>
+          )}
           {extracting && (
             <Typography variant="caption" color="text.secondary" sx={{ pl: 5 }}>
               Leyendo tu archivo…
