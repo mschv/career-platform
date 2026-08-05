@@ -117,3 +117,121 @@ ${PROFILE_JSON_SHAPE}`;
   const raw = await generateText({ system, prompt, temperature: 0.2 });
   return parseProfileJson(raw, 'editProfileWithInstruction');
 }
+
+export type DocType = 'cv' | 'cover_letter';
+
+const DOC_LABEL: Record<DocType, string> = {
+  cv: 'un CV / hoja de vida',
+  cover_letter: 'una carta de presentación',
+};
+
+// Shared "don't fabricate identity data" rule — the profile has no name,
+// phone, or DNI field (onboarding never asks for them), so both documents
+// must use bracketed placeholders instead of inventing a person.
+const NO_FABRICATION_RULE = `Si no tienes el nombre completo, teléfono o DNI del candidato, usa
+placeholders claros entre corchetes ("[Tu nombre completo]", "[Tu teléfono]", "[Tu DNI]") —
+nunca los inventes. Usa el correo real si se proporciona.`;
+
+const CV_SYSTEM_PROMPT = `Eres un experto en redacción de hojas de vida (CV) para el mercado
+laboral peruano, especializado en perfiles de recién egresados y profesionales junior. Vas a
+generar una hoja de vida completa en español, en texto plano bien estructurado — sin markdown,
+sin tablas, sin columnas — para que sea compatible con sistemas ATS.
+
+ESTRUCTURA Y ORDEN (en este orden, con encabezados en mayúsculas):
+
+1. Encabezado de contacto: nombre completo, DNI, teléfono, correo. ${NO_FABRICATION_RULE}
+   Justo después agrega esta línea exacta: "[Adjunta aquí tu fotografía profesional — es
+   práctica habitual en el mercado peruano; este documento es solo texto]".
+2. RESUMEN PROFESIONAL: 40-60 palabras. Menciona el rol o área de especialización, los años
+   de experiencia o el logro más destacado, y el valor específico que ofrece el candidato.
+   Nunca uses relleno genérico como "persona responsable y puntual" — sé específico y basado
+   en el perfil real.
+3. EXPERIENCIA: orden cronológico inverso (la más reciente primero). Cada puesto con viñetas
+   que empiecen con verbos de acción. Si el perfil trae cifras o resultados medibles para ese
+   puesto, cuantifícalos (ej. "Aumenté ventas en 20%"). Si NO hay cifras para ese puesto,
+   escribe una viñeta cualitativa sólida en su lugar — nunca inventes números.
+4. EDUCACIÓN: orden cronológico inverso.
+5. HABILIDADES: habilidades técnicas relevantes, más un máximo de 3-4 habilidades blandas
+   elegidas específicamente por su relevancia al puesto descrito — no una lista genérica.
+6. IDIOMAS: inclúyela ÚNICAMENTE si el perfil menciona algún idioma con nivel de dominio
+   (revisa habilidades, intereses y experiencia). Si no hay esa información, omite la
+   sección por completo — no la incluyas vacía.
+7. Cierra con la línea exacta: "Referencias disponibles a solicitud."
+
+EXTENSIÓN: el público principal son recién egresados — mantenlo en el equivalente a 1-2
+páginas, no generes contenido de más.
+
+Responde ÚNICAMENTE con el texto del CV, sin explicaciones ni comentarios adicionales.`;
+
+const COVER_LETTER_SYSTEM_PROMPT = `Eres un experto en redacción de cartas de presentación
+para el mercado laboral peruano. Vas a generar una carta de presentación formal en español,
+en registro de carta comercial peruana.
+
+REQUISITOS:
+- Abre con "Estimados señores de [nombre de la empresa]" (usa el nombre real de la empresa
+  proporcionado), o con el nombre de un contacto de reclutamiento específico si el perfil o
+  la descripción del puesto lo menciona.
+- Haz referencia específica a la empresa y al puesto indicados — evita lenguaje genérico que
+  podría aplicar a cualquier postulación; ese es justamente el propósito de generar esto por
+  cada aplicación en vez de reusar una plantilla.
+- Conecta la experiencia y habilidades reales del candidato (del perfil proporcionado) con lo
+  que pide la descripción del puesto.
+- Cierra con "Atentamente," seguido del nombre completo del candidato. ${NO_FABRICATION_RULE}
+- Tono formal y profesional, propio de una carta de presentación peruana.
+- Debe caber en menos de una página (aproximadamente 250-350 palabras).
+
+Responde ÚNICAMENTE con el texto de la carta, sin explicaciones ni comentarios adicionales.`;
+
+/**
+ * Generates a CV or cover letter for one application, grounded in the
+ * candidate's real profile data and the specific job posting — never a
+ * generic template. Peru-market formatting/register is baked into the
+ * system prompts above.
+ */
+export async function generateDocument(params: {
+  type: DocType;
+  profile: {
+    experiencia?: unknown[];
+    educacion?: unknown[];
+    habilidades?: unknown[];
+    intereses?: unknown[];
+  };
+  email?: string | null;
+  company: string;
+  role: string;
+  jobDescription?: string | null;
+}) {
+  const system = params.type === 'cv' ? CV_SYSTEM_PROMPT : COVER_LETTER_SYSTEM_PROMPT;
+  const prompt = `Perfil del candidato (correo real: ${params.email ?? '(no disponible)'}):
+${JSON.stringify(params.profile)}
+
+Empresa: ${params.company}
+Puesto: ${params.role}
+Descripción del puesto:
+${params.jobDescription?.trim() || '(no proporcionada)'}`;
+
+  return generateText({ system, prompt, temperature: 0.4 });
+}
+
+/**
+ * Applies a single free-text edit instruction to an already-generated
+ * document (via the application detail page's side chat). Returns the full
+ * revised document text — the model must preserve the Peru-specific
+ * structure/register established at generation time and only change what
+ * was asked.
+ */
+export async function reviseDocument(params: { type: DocType; currentContent: string; instruction: string }) {
+  const system = `Eres un asistente que edita documentos de postulación laboral para el
+mercado peruano (${DOC_LABEL[params.type]}) en español. Se te da el documento actual completo
+y una instrucción de edición del usuario. Aplica ÚNICAMENTE el cambio pedido, manteniendo
+intacto el resto del documento y su formato (estructura de secciones, registro formal, sin
+markdown ni tablas). No inventes datos personales, cifras o logros que no estén ya en el
+documento o que el usuario no haya dado explícitamente en su instrucción.
+
+Responde ÚNICAMENTE con el texto completo del documento revisado, sin explicaciones, comillas
+ni comentarios adicionales.`;
+
+  const prompt = `Documento actual:\n${params.currentContent}\n\nInstrucción: ${params.instruction}`;
+
+  return generateText({ system, prompt, temperature: 0.4 });
+}
