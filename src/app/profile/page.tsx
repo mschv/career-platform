@@ -31,8 +31,8 @@ import { computeCompleteness } from '@/lib/profile';
 const PENDING_PROFILE_KEY = 'pending_profile';
 
 type ProfileRow = {
-  experiencia: { puesto?: string; empresa?: string; descripcion?: string }[];
-  educacion: { titulo?: string; institucion?: string }[];
+  experiencia: { puesto?: string; empresa?: string; lugar?: string; fecha?: string; descripcion?: string }[];
+  educacion: { titulo?: string; institucion?: string; lugar?: string; fecha?: string }[];
   habilidades: string[];
   intereses: string[];
   suggested_roles: { role: string; why: string }[];
@@ -214,7 +214,8 @@ export default function ProfilePage() {
                     <Box key={i}>
                       <Typography fontWeight={600}>{e.puesto}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {e.empresa}
+                        {[e.empresa, e.lugar].filter(Boolean).join(' — ')}
+                        {e.fecha ? ` · ${e.fecha}` : ''}
                       </Typography>
                       <Typography variant="body2" sx={{ mt: 0.5 }}>
                         {e.descripcion}

@@ -35,13 +35,21 @@ export async function chat(messages: { role: 'system' | 'user' | 'assistant'; co
 }
 
 const PROFILE_JSON_SHAPE = `{
-  "experiencia": [{ "puesto": "", "empresa": "", "descripcion": "" }],
-  "educacion": [{ "titulo": "", "institucion": "" }],
+  "experiencia": [{ "puesto": "", "empresa": "", "lugar": "", "fecha": "", "descripcion": "" }],
+  "educacion": [{ "titulo": "", "institucion": "", "lugar": "", "fecha": "" }],
   "habilidades": ["..."],
   "intereses": ["..."],
   "suggested_roles": [{ "role": "", "why": "" }],
   "upskilling_suggestions": ["..."]
 }`;
+
+// Shared across extraction and edits — "lugar" and "fecha" are free text
+// (e.g. "Lima, Perú", "2021 - 2023") so the model can capture whatever
+// granularity the user actually gave, but it must never invent them.
+const NO_FABRICATION_DATES_RULE = `Para "lugar" y "fecha" en experiencia y educación: úsalos
+solo si el usuario los mencionó explícitamente, en el formato que haya dado. Si no se
+mencionó lugar o fecha para una entrada, deja ese campo como cadena vacía "" — nunca los
+inventes ni asumas una fecha "razonable".`;
 
 // Despite instructions, the model sometimes wraps JSON in a markdown code
 // fence or adds a leading/trailing sentence. Try pulling out the first
@@ -74,6 +82,8 @@ export async function extractProfileFromText(rawText: string) {
   const system = `Eres un asistente que extrae información de perfil profesional de texto en español.
 Responde ÚNICAMENTE con JSON válido, sin texto adicional, con esta forma:
 ${PROFILE_JSON_SHAPE}
+
+${NO_FABRICATION_DATES_RULE}
 
 Para suggested_roles, sugiere 2-4 roles laborales que le podrían quedar bien
 dada su experiencia, habilidades e intereses, cada uno con una razón breve
@@ -108,8 +118,10 @@ instrucción del usuario. Se te da el perfil actual en JSON y una instrucción d
 Aplica ÚNICAMENTE el cambio pedido y deja todo lo demás exactamente igual — no reescribas ni
 "mejores" campos que no te pidieron cambiar. Si la instrucción implica que la lista de roles
 sugeridos o de ideas para crecer ya no encaja con el perfil actualizado, puedes ajustarlas
-también; si no, déjalas igual. Responde ÚNICAMENTE con el perfil COMPLETO actualizado como
-JSON válido, sin texto adicional, con esta forma exacta:
+también; si no, déjalas igual. ${NO_FABRICATION_DATES_RULE}
+
+Responde ÚNICAMENTE con el perfil COMPLETO actualizado como JSON válido, sin texto adicional,
+con esta forma exacta:
 ${PROFILE_JSON_SHAPE}`;
 
   const prompt = `Perfil actual:\n${JSON.stringify(currentProfile)}\n\nInstrucción: ${instruction}`;
@@ -146,11 +158,18 @@ ESTRUCTURA Y ORDEN (en este orden, con encabezados en mayúsculas):
    de experiencia o el logro más destacado, y el valor específico que ofrece el candidato.
    Nunca uses relleno genérico como "persona responsable y puntual" — sé específico y basado
    en el perfil real.
-3. EXPERIENCIA: orden cronológico inverso (la más reciente primero). Cada puesto con viñetas
-   que empiecen con verbos de acción. Si el perfil trae cifras o resultados medibles para ese
-   puesto, cuantifícalos (ej. "Aumenté ventas en 20%"). Si NO hay cifras para ese puesto,
-   escribe una viñeta cualitativa sólida en su lugar — nunca inventes números.
-4. EDUCACIÓN: orden cronológico inverso.
+3. EXPERIENCIA: orden cronológico inverso (la más reciente primero). Cada puesto empieza con
+   una línea de encabezado en el formato "Puesto — Empresa" y, ÚNICAMENTE si el perfil trae
+   esa información, agrega " — Lugar" y/o " (Fecha)" (ej. "IT & Strategy Consultant —
+   Brachitek — Lima, Perú (2022 - 2023)"). Si el perfil no trae lugar o fecha para esa
+   entrada, omite esa parte del encabezado por completo — nunca inventes fechas ni
+   ubicaciones. Debajo del encabezado, una o más viñetas que empiecen con verbos de acción.
+   Si el perfil trae cifras o resultados medibles para ese puesto, cuantifícalos (ej.
+   "Aumenté ventas en 20%"). Si NO hay cifras para ese puesto, escribe una viñeta cualitativa
+   sólida en su lugar — nunca inventes números.
+4. EDUCACIÓN: orden cronológico inverso. Cada entrada en el formato "Título — Institución" y,
+   ÚNICAMENTE si el perfil lo trae, " — Lugar" y/o " (Fecha)" — mismo criterio que en
+   EXPERIENCIA: nunca inventes fechas ni ubicaciones que no estén en el perfil.
 5. HABILIDADES: habilidades técnicas relevantes, más un máximo de 3-4 habilidades blandas
    elegidas específicamente por su relevancia al puesto descrito — no una lista genérica.
 6. IDIOMAS: inclúyela ÚNICAMENTE si el perfil menciona algún idioma con nivel de dominio

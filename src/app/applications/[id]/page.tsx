@@ -241,16 +241,45 @@ export default function ApplicationDetailPage() {
   }
 
   async function downloadDocx() {
-    const { Document, Packer, Paragraph } = await import('docx');
-    const doc = new Document({
-      sections: [
-        {
-          children: content
-            .split('\n')
-            .map((line) => new Paragraph({ text: line })),
-        },
-      ],
+    const { Document, Packer, Paragraph, TextRun } = await import('docx');
+
+    // Section headers are always these exact ALL-CAPS strings (baked into
+    // the generation prompt in lib/ai/groq.ts); entry sub-headers ("Puesto
+    // — Empresa — Lugar (Fecha)") always use an em dash "—", which plain
+    // body text and bullet lines never contain — cheap, reliable hooks for
+    // styling plain text into a properly formatted Word doc.
+    const SECTION_HEADERS = new Set(['RESUMEN PROFESIONAL', 'EXPERIENCIA', 'EDUCACIÓN', 'HABILIDADES', 'IDIOMAS']);
+
+    const lines = content.split('\n');
+    const paragraphs = lines.map((line, i) => {
+      const trimmed = line.trim();
+
+      if (i === 0 && trimmed) {
+        return new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: trimmed, bold: true, size: 32 })] });
+      }
+      if (SECTION_HEADERS.has(trimmed)) {
+        return new Paragraph({
+          spacing: { before: 240, after: 120 },
+          children: [new TextRun({ text: trimmed, bold: true, size: 26 })],
+        });
+      }
+      if (trimmed.startsWith('- ')) {
+        return new Paragraph({
+          bullet: { level: 0 },
+          spacing: { after: 60 },
+          children: [new TextRun({ text: trimmed.slice(2), size: 22 })],
+        });
+      }
+      if (!trimmed.startsWith('-') && trimmed.includes('—')) {
+        return new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: trimmed, bold: true, size: 22 })] });
+      }
+      if (!trimmed) {
+        return new Paragraph({ text: '' });
+      }
+      return new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: trimmed, size: 22 })] });
     });
+
+    const doc = new Document({ sections: [{ children: paragraphs }] });
 
     const blob = await Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
@@ -327,7 +356,10 @@ export default function ApplicationDetailPage() {
         <Grid container spacing={3}>
           {/* Side chat */}
           <Grid item xs={12} md={4}>
-            <Paper variant="outlined" sx={{ p: 2, height: 520, display: 'flex', flexDirection: 'column' }}>
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, height: 'calc(100vh - 300px)', minHeight: 420, display: 'flex', flexDirection: 'column' }}
+            >
               <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, mb: 1 }}>
                 {messages.map((m, i) => (
                   <Stack
@@ -381,7 +413,10 @@ export default function ApplicationDetailPage() {
 
           {/* Document editor */}
           <Grid item xs={12} md={8}>
-            <Paper variant="outlined" sx={{ p: 0, height: 520, display: 'flex', flexDirection: 'column' }}>
+            <Paper
+              variant="outlined"
+              sx={{ p: 0, height: 'calc(100vh - 300px)', minHeight: 420, display: 'flex', flexDirection: 'column' }}
+            >
               <Stack
                 direction="row"
                 justifyContent="space-between"
@@ -420,16 +455,30 @@ export default function ApplicationDetailPage() {
                   </Stack>
                 </Box>
               ) : (
-                <TextField
-                  multiline
-                  fullWidth
+                // A plain scrollable textarea, not MUI's `multiline` TextField — that one
+                // auto-grows to fit its content via react-textarea-autosize, which fights a
+                // fixed-height flex parent and made content overflow the box instead of
+                // scrolling inside it.
+                <Box
+                  component="textarea"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   onBlur={saveManualEdit}
                   sx={{
                     flex: 1,
-                    '& .MuiInputBase-root': { height: '100%', alignItems: 'flex-start', p: 3 },
-                    '& textarea': { fontFamily: tokens.font.body, fontSize: 14, lineHeight: 1.7 },
+                    width: '100%',
+                    minHeight: 0,
+                    boxSizing: 'border-box',
+                    p: 3,
+                    border: 'none',
+                    outline: 'none',
+                    resize: 'none',
+                    overflowY: 'auto',
+                    bgcolor: 'transparent',
+                    color: 'text.primary',
+                    fontFamily: tokens.font.body,
+                    fontSize: 14,
+                    lineHeight: 1.7,
                   }}
                 />
               )}
